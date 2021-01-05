@@ -138,8 +138,10 @@ func New(ctx context.Context, ls stores.LocalStorage, si stores.SectorIndex, sc 
 
 	m.setupWorkTracker()
 
+	// 启动调度器
 	go m.sched.runSched()
 
+	// 根据miner启动的参数，收集本地worker支持的任务类型。
 	localTasks := []sealtasks.TaskType{
 		sealtasks.TTCommit1, sealtasks.TTFinalize, sealtasks.TTFetch, sealtasks.TTReadUnsealed,
 	}
@@ -159,6 +161,7 @@ func New(ctx context.Context, ls stores.LocalStorage, si stores.SectorIndex, sc 
 		localTasks = append(localTasks, sealtasks.TTUnseal)
 	}
 
+	// miner一启动，增加本地worker
 	err = m.AddWorker(ctx, NewLocalWorker(WorkerConfig{
 		TaskTypes: localTasks,
 	}, stor, lstor, si, m, wss))

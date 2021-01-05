@@ -65,23 +65,29 @@ func checkTicketExpired(sector SectorInfo, epoch abi.ChainEpoch) bool {
 }
 
 func (m *Sealing) getTicket(ctx statemachine.Context, sector SectorInfo) (abi.SealRandomness, abi.ChainEpoch, error) {
+	// 获取当前链头的tipset内容和高度：tok是tipset内容，epoch是高度.
 	tok, epoch, err := m.api.ChainHead(ctx.Context())
 	if err != nil {
 		log.Errorf("handlePreCommit1: api error, not proceeding: %+v", err)
 		return nil, 0, nil
 	}
 
+	// ticket高度等于当前高度 - 900
 	ticketEpoch := epoch - policy.SealRandomnessLookback
+
+	// 将矿工地址反序列化到bytes.Buffer
 	buf := new(bytes.Buffer)
 	if err := m.maddr.MarshalCBOR(buf); err != nil {
 		return nil, 0, err
 	}
 
+	// 根据矿工地址，和扇区号，查询这个扇区的precommit信息
 	pci, err := m.api.StateSectorPreCommitInfo(ctx.Context(), m.maddr, sector.SectorNumber, tok)
 	if err != nil {
 		return nil, 0, xerrors.Errorf("getting precommit info: %w", err)
 	}
 
+	// 如果之前的precommit信息存在
 	if pci != nil {
 		ticketEpoch = pci.Info.SealRandEpoch
 
@@ -126,6 +132,7 @@ func (m *Sealing) handleGetTicket(ctx statemachine.Context, sector SectorInfo) e
 }
 
 func (m *Sealing) handlePreCommit1(ctx statemachine.Context, sector SectorInfo) error {
+	// Pieces完整性检查
 	if err := checkPieces(ctx.Context(), m.maddr, sector, m.api); err != nil { // Sanity check state
 		switch err.(type) {
 		case *ErrApi:
@@ -141,21 +148,27 @@ func (m *Sealing) handlePreCommit1(ctx statemachine.Context, sector SectorInfo) 
 		}
 	}
 
+	// 获取当前高度
 	_, height, err := m.api.ChainHead(ctx.Context())
 	if err != nil {
 		log.Errorf("handlePreCommit1: api error, not proceeding: %+v", err)
 		return nil
 	}
 
+	// 检查Ticket是否超时，Ticket是P1阶段开始之前，有一个GetTicket动作
+	// Ticket不能比当前高度小于2.
 	if checkTicketExpired(sector, height) {
 		return ctx.Send(SectorOldTicket{}) // go get new ticket
 	}
 
+	// 调用sealing的sector manager，处理PreCommit1任务.
+	// m.sealer.SealPreCommit1会查找适合的worker，处理这个任务.
 	pc1o, err := m.sealer.SealPreCommit1(sector.sealingCtx(ctx.Context()), m.minerSector(sector.SectorType, sector.SectorNumber), sector.TicketValue, sector.pieceInfos())
 	if err != nil {
 		return ctx.Send(SectorSealPreCommit1Failed{xerrors.Errorf("seal pre commit(1) failed: %w", err)})
 	}
 
+	// 向StateMachine发送状态PreCommit1成功的状态
 	return ctx.Send(SectorPreCommit1{
 		PreCommit1Out: pc1o,
 	})

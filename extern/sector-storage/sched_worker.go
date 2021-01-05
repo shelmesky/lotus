@@ -24,11 +24,13 @@ type schedWorker struct {
 
 // context only used for startup
 func (sh *scheduler) runWorker(ctx context.Context, w Worker) error {
+	// 调用worker的api，获取worker的hostname，以及cpu、内存、gpu资源的信息。
 	info, err := w.Info(ctx)
 	if err != nil {
 		return xerrors.Errorf("getting worker info: %w", err)
 	}
 
+	// 获取worker的sessionID
 	sessID, err := w.Session(ctx)
 	if err != nil {
 		return xerrors.Errorf("getting worker session: %w", err)
@@ -51,31 +53,33 @@ func (sh *scheduler) runWorker(ctx context.Context, w Worker) error {
 
 	wid := WorkerID(sessID)
 
-	sh.workersLk.Lock()
-	_, exist := sh.workers[wid]
+	sh.workersLk.Lock()	// 锁定workers列表锁
+	_, exist := sh.workers[wid]	// 如果worker已经存在
 	if exist {
 		log.Warnw("duplicated worker added", "id", wid)
 
 		// this is ok, we're already handling this worker in a different goroutine
-		return nil
+		return nil	// 这样做是没问题的，因为已经在另一个goroutine中处理了worker.
 	}
 
-	sh.workers[wid] = worker
+	sh.workers[wid] = worker	// 在workers列表在红添加worker
 	sh.workersLk.Unlock()
 
+	// 创建一个调度这个新worker的对象
 	sw := &schedWorker{
 		sched:  sh,
 		worker: worker,
 
 		wid: wid,
 
-		heartbeatTimer:   time.NewTicker(stores.HeartbeatInterval),
+		heartbeatTimer:   time.NewTicker(stores.HeartbeatInterval),	// 和worker之间的心跳：10秒
 		scheduledWindows: make(chan *schedWindow, SchedWindows),
 		taskDone:         make(chan struct{}, 1),
 
 		windowsRequested: 0,
 	}
 
+	// 启动一个goroutine，用于调度这个worker.
 	go sw.handleWorker()
 
 	return nil

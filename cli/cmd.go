@@ -112,8 +112,8 @@ func GetAPIInfo(ctx *cli.Context, t repo.RepoType) (cliutil.APIInfo, error) {
 		return cliutil.APIInfo{Addr: strma}, nil
 	}
 
-	envKey := envForRepo(t)
-	env, ok := os.LookupEnv(envKey)
+	envKey := envForRepo(t)	// 根据 t 的类型（FULLNODE_API_INFO / MINER_API_INFO / WORKER_API_INFO)
+	env, ok := os.LookupEnv(envKey)	// 查找环境变量中，是否有对应的值.
 	if !ok {
 		// TODO remove after deprecation period
 		envKey = envForRepoDeprecation(t)
@@ -123,7 +123,7 @@ func GetAPIInfo(ctx *cli.Context, t repo.RepoType) (cliutil.APIInfo, error) {
 		}
 	}
 	if ok {
-		return cliutil.ParseApiInfo(env), nil
+		return cliutil.ParseApiInfo(env), nil	// 解析环境变量中的API信息
 	}
 
 	repoFlag := flagForRepo(t)

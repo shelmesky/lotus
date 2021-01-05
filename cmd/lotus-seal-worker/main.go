@@ -217,11 +217,11 @@ var runCmd = &cli.Command{
 
 		// Check params
 
-		act, err := nodeApi.ActorAddress(ctx)
+		act, err := nodeApi.ActorAddress(ctx)	// 从miner api获取当前矿工actor
 		if err != nil {
 			return err
 		}
-		ssize, err := nodeApi.ActorSectorSize(ctx, act)
+		ssize, err := nodeApi.ActorSectorSize(ctx, act)	// 获取actor的扇区大小
 		if err != nil {
 			return err
 		}
@@ -232,6 +232,7 @@ var runCmd = &cli.Command{
 			}
 		}
 
+		// 获取worker支持的任务类型
 		var taskTypes []sealtasks.TaskType
 
 		taskTypes = append(taskTypes, sealtasks.TTFetch, sealtasks.TTCommit1, sealtasks.TTFinalize)
@@ -258,20 +259,22 @@ var runCmd = &cli.Command{
 
 		// Open repo
 
-		repoPath := cctx.String(FlagWorkerRepo)
+		repoPath := cctx.String(FlagWorkerRepo)	// worker的工作目录，保存配置文件等元数据。
 		r, err := repo.NewFS(repoPath)
 		if err != nil {
 			return err
 		}
 
-		ok, err := r.Exists()
+		ok, err := r.Exists()	// worker工作目录是否存在
 		if err != nil {
 			return err
 		}
+
+		// 初始化时
 		if !ok {
 			if err := r.Init(repo.Worker); err != nil {
 				return err
-			}
+			}	// 不存在则初始化配置文件和keystore
 
 			lr, err := r.Lock(repo.Worker)
 			if err != nil {
@@ -280,7 +283,7 @@ var runCmd = &cli.Command{
 
 			var localPaths []stores.LocalPath
 
-			if !cctx.Bool("no-local-storage") {
+			if !cctx.Bool("no-local-storage") {	// 如果没有设置参数：no-local-storage，意为使用
 				b, err := json.MarshalIndent(&stores.LocalStorageMeta{
 					ID:       stores.ID(uuid.New().String()),
 					Weight:   10,
@@ -291,6 +294,7 @@ var runCmd = &cli.Command{
 					return xerrors.Errorf("marshaling storage config: %w", err)
 				}
 
+				// 写入sectorstore.json，这个文件中保存了
 				if err := ioutil.WriteFile(filepath.Join(lr.Path(), "sectorstore.json"), b, 0644); err != nil {
 					return xerrors.Errorf("persisting storage metadata (%s): %w", filepath.Join(lr.Path(), "sectorstore.json"), err)
 				}
@@ -318,16 +322,16 @@ var runCmd = &cli.Command{
 			}
 		}
 
-		lr, err := r.Lock(repo.Worker)
+		lr, err := r.Lock(repo.Worker)	// 初始化带锁的文件存储，支持dataStore/blockStore/keyStore
 		if err != nil {
 			return err
 		}
 		defer func() {
-			if err := lr.Close(); err != nil {
+			if err := lr.Close(); err != nil {	// 函数退出时关闭文件锁存储
 				log.Error("closing repo", err)
 			}
 		}()
-		ds, err := lr.Datastore("/metadata")
+		ds, err := lr.Datastore("/metadata")	// 初始化 "元数据" 命名空间的
 		if err != nil {
 			return err
 		}
@@ -350,17 +354,21 @@ var runCmd = &cli.Command{
 			}
 		}
 
+		// 参数 lr 是local repo的缩写，nodeAPI是连接到矿工的API
+		// 第三个参数是worker监听的地址：http://xxxx:3456/remote
+		// 初始化一个本地的扇区存储
 		localStore, err := stores.NewLocal(ctx, lr, nodeApi, []string{"http://" + address + "/remote"})
 		if err != nil {
 			return err
 		}
 
 		// Setup remote sector store
-		sminfo, err := lcli.GetAPIInfo(cctx, repo.StorageMiner)
+		sminfo, err := lcli.GetAPIInfo(cctx, repo.StorageMiner)	// 获取环境变量中API信息
 		if err != nil {
 			return xerrors.Errorf("could not get api info: %w", err)
 		}
 
+		// 创建Remote结构：本地存储、miner api信息、API的token和api
 		remote := stores.NewRemote(localStore, nodeApi, sminfo.AuthHeader(), cctx.Int("parallel-fetch-limit"))
 
 		fh := &stores.FetchHandler{Local: localStore}
@@ -509,6 +517,8 @@ var runCmd = &cli.Command{
 
 					select {
 					case <-readyCh:
+						// 连接到矿工api，将自身的信息，即 http://xxxx:3456/rpc/v0　作为参数传递给miner api的接口。
+						// miner收到后会尝试连接到worker。
 						if err := nodeApi.WorkerConnect(ctx, "http://"+address+"/rpc/v0"); err != nil {
 							log.Errorf("Registering worker failed: %+v", err)
 							cancel()

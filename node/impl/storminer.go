@@ -332,7 +332,9 @@ func (sm *StorageMinerAPI) SectorMarkForUpgrade(ctx context.Context, id abi.Sect
 	return sm.Miner.MarkForUpgrade(id)
 }
 
+// miner提供的API，worker启动后会调用这个api，把worker自身监听的地址当作参数发送给miner
 func (sm *StorageMinerAPI) WorkerConnect(ctx context.Context, url string) error {
+	// 连接到worker的url，返回一个remote worker对象
 	w, err := connectRemoteWorker(ctx, sm, url)
 	if err != nil {
 		return xerrors.Errorf("connecting remote storage failed: %w", err)
@@ -340,6 +342,7 @@ func (sm *StorageMinerAPI) WorkerConnect(ctx context.Context, url string) error 
 
 	log.Infof("Connected to a remote worker at %s", url)
 
+	// 把remote worker交给sectorsstorage.Manager管理
 	return sm.StorageMgr.AddWorker(ctx, w)
 }
 
