@@ -53,7 +53,7 @@ type WorkerSelector interface {
 
 type scheduler struct {
 	workersLk sync.RWMutex
-	workers   map[WorkerID]*workerHandle
+	workers   map[WorkerID]*workerHandle // 保存每个worker对应的处理handler
 
 	schedule       chan *workerRequest
 	windowRequests chan *schedWindowRequest
@@ -73,11 +73,13 @@ type scheduler struct {
 	testSync chan struct{} // used for testing
 }
 
+// 每个worker的远程api和资源信息等
 type workerHandle struct {
-	workerRpc Worker
+	workerRpc Worker // 远程worker的API
 
-	info storiface.WorkerInfo
+	info storiface.WorkerInfo // worker资源信息
 
+	// worker的当前资源？
 	preparing *activeResources
 	active    *activeResources
 
@@ -120,14 +122,15 @@ type activeResources struct {
 	cond *sync.Cond
 }
 
+// 发送给worker的请求
 type workerRequest struct {
-	sector   storage.SectorRef
-	taskType sealtasks.TaskType
-	priority int // larger values more important
-	sel      WorkerSelector
+	sector   storage.SectorRef	// 扇区信息
+	taskType sealtasks.TaskType	// 任务类型
+	priority int // larger values more important	// 任务优先级
+	sel      WorkerSelector		// 任务关联的worker？
 
-	prepare WorkerAction
-	work    WorkerAction
+	prepare WorkerAction		// 任务执行之前，worker需要做的（回调函数）
+	work    WorkerAction		// 任务执行时，worker需要做的（回调函数）
 
 	start time.Time
 
@@ -165,11 +168,19 @@ func newScheduler() *scheduler {
 	}
 }
 
-func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, taskType sealtasks.TaskType, sel WorkerSelector, prepare WorkerAction, work WorkerAction) error {
+// 将一个扇区的任务发送给核心的调度器
+/*
+sector: 扇区信息：id和扇区大小
+
+taskType: 任务类型
+
+ */
+func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, taskType sealtasks.TaskType,
+	sel WorkerSelector, prepare WorkerAction, work WorkerAction) error {
 	ret := make(chan workerResponse)
 
 	select {
-	case sh.schedule <- &workerRequest{
+	case sh.schedule <- &workerRequest{	// 需要worker执行的任务，发送给channel: sh.schedule　
 		sector:   sector,
 		taskType: taskType,
 		priority: getPriority(ctx),
@@ -218,10 +229,11 @@ type SchedDiagInfo struct {
 	OpenWindows []string
 }
 
+// 调度循环：持续运行
 func (sh *scheduler) runSched() {
 	defer close(sh.closed)
 
-	iw := time.After(InitWait)
+	iw := time.After(InitWait)	// 等待3秒
 	var initialised bool
 
 	for {
@@ -234,9 +246,9 @@ func (sh *scheduler) runSched() {
 		case dreq := <-sh.workerDisable:
 			toDisable = append(toDisable, dreq)
 			doSched = true
-		case req := <-sh.schedule:
-			sh.schedQueue.Push(req)
-			doSched = true
+		case req := <-sh.schedule:	// 收到worker任务
+			sh.schedQueue.Push(req)	// 将任务发送到请求队列中
+			doSched = true			// 标志为：需要调度
 
 			if sh.testSync != nil {
 				sh.testSync <- struct{}{}
@@ -256,9 +268,11 @@ func (sh *scheduler) runSched() {
 			return
 		}
 
+		// 如果需要调度，并且是第一次初始化
 		if doSched && initialised {
 			// First gather any pending tasks, so we go through the scheduling loop
 			// once for every added task
+			// 首先收集所有待处理的任务，因此我们为每个添加的任务执行一次调度循环
 		loop:
 			for {
 				select {
@@ -277,6 +291,7 @@ func (sh *scheduler) runSched() {
 				}
 			}
 
+			// worker的调度器停止后，worker负责的任务，都需要重新加入到调度队列中.
 			for _, req := range toDisable {
 				for _, window := range req.activeWindows {
 					for _, request := range window.todo {
@@ -299,7 +314,7 @@ func (sh *scheduler) runSched() {
 				req.done()
 			}
 
-			sh.trySched()
+			sh.trySched()	// 调度worker
 		}
 
 	}
@@ -345,14 +360,15 @@ func (sh *scheduler) trySched() {
 
 	*/
 
-	sh.workersLk.RLock()
+	sh.workersLk.RLock()	// 锁定调度器全局锁
 	defer sh.workersLk.RUnlock()
 
 	windowsLen := len(sh.openWindows)
-	queuneLen := sh.schedQueue.Len()
+	queuneLen := sh.schedQueue.Len()	// 请求队列长度
 
 	log.Debugf("SCHED %d queued; %d open windows", queuneLen, windowsLen)
 
+	// 如果没有worker则不需要调度直接返回
 	if windowsLen == 0 || queuneLen == 0 {
 		// nothing to schedule on
 		return
@@ -362,21 +378,21 @@ func (sh *scheduler) trySched() {
 	acceptableWindows := make([][]int, queuneLen)
 
 	// Step 1
-	throttle := make(chan struct{}, windowsLen)
+	throttle := make(chan struct{}, windowsLen)	// 根据窗口大小创建 throttle
 
 	var wg sync.WaitGroup
 	wg.Add(queuneLen)
-	for i := 0; i < queuneLen; i++ {
+	for i := 0; i < queuneLen; i++ {	// 根据请求队列大小循环
 		throttle <- struct{}{}
 
-		go func(sqi int) {
+		go func(sqi int) {	// 启动goroutine
 			defer wg.Done()
 			defer func() {
 				<-throttle
 			}()
 
-			task := (*sh.schedQueue)[sqi]
-			needRes := ResourceTable[task.taskType][task.sector.ProofType]
+			task := (*sh.schedQueue)[sqi]	// 从请求队列中取出任务
+			needRes := ResourceTable[task.taskType][task.sector.ProofType]	// 根据扇区大小和任务类型，得出需要的资源大小
 
 			task.indexHeap = sqi
 			for wnd, windowRequest := range sh.openWindows {
@@ -387,7 +403,7 @@ func (sh *scheduler) trySched() {
 					continue
 				}
 
-				if !worker.enabled {
+				if !worker.enabled {	// 如果worker被禁止
 					log.Debugw("skipping disabled worker", "worker", windowRequest.worker)
 					continue
 				}

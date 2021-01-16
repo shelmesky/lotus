@@ -136,12 +136,13 @@ func (p *path) sectorPath(sid abi.SectorID, fileType storiface.SectorFileType) s
 
 func NewLocal(ctx context.Context, ls LocalStorage, index SectorIndex, urls []string) (*Local, error) {
 	l := &Local{
-		localStorage: ls,
-		index:        index,
+		localStorage: ls,		// miner自身的存储，例如：/data/lotus-miner
+		index:        index,	// 管理
 		urls:         urls,
 
 		paths: map[ID]*path{},
 	}
+	// l.open() 打开本地存储，用于存储扇区临时数据，或者扇区的永久存储。
 	return l, l.open(ctx)
 }
 

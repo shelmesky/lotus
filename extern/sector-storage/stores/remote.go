@@ -125,6 +125,8 @@ func (r *Remote) AcquireSector(ctx context.Context, s storage.SectorRef, existin
 	}
 	defer releaseStorage()
 
+	// 迭代unsealed, sealed, cache三种类型．判断这三种类型在本地是否存在
+	// 不存在就调用 r.acquireFromRemote 从远程获取.
 	for _, fileType := range storiface.PathTypes {
 		if fileType&existing == 0 {
 			continue
@@ -137,6 +139,7 @@ func (r *Remote) AcquireSector(ctx context.Context, s storage.SectorRef, existin
 		dest := storiface.PathByType(apaths, fileType)
 		storageID := storiface.PathByType(ids, fileType)
 
+		// 从远程获取
 		url, err := r.acquireFromRemote(ctx, s.ID, fileType, dest)
 		if err != nil {
 			return storiface.SectorPaths{}, storiface.SectorPaths{}, err

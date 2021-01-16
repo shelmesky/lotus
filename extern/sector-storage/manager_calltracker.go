@@ -101,7 +101,12 @@ func (m *Manager) setupWorkTracker() {
 }
 
 // returns wait=true when the task is already tracked/running
+/*
+manager记录每个任务（由扇区、任务类型、ticket、pieces构成）
+返回任务ID，cancel函数
+ */
 func (m *Manager) getWork(ctx context.Context, method sealtasks.TaskType, params ...interface{}) (wid WorkID, wait bool, cancel func(), err error) {
+	// 把任务的信息组成一个WorkID
 	wid, err = newWorkID(method, params)
 	if err != nil {
 		return WorkID{}, false, nil, xerrors.Errorf("creating WorkID: %w", err)
@@ -110,12 +115,15 @@ func (m *Manager) getWork(ctx context.Context, method sealtasks.TaskType, params
 	m.workLk.Lock()
 	defer m.workLk.Unlock()
 
+	// 查询manager的存储中，是否已经存在这个任务
 	have, err := m.work.Has(wid)
 	if err != nil {
 		return WorkID{}, false, nil, xerrors.Errorf("failed to check if the task is already tracked: %w", err)
 	}
 
+	// 如果manager中不存在这个任务
 	if !have {
+		// 在manager的datastore保存这个任务的信息（持久话任务信息）
 		err := m.work.Begin(wid, &WorkState{
 			ID:     wid,
 			Status: wsStarted,
@@ -124,6 +132,7 @@ func (m *Manager) getWork(ctx context.Context, method sealtasks.TaskType, params
 			return WorkID{}, false, nil, xerrors.Errorf("failed to track task start: %w", err)
 		}
 
+		// 返回workID、没有任务等待标志、取消函数
 		return wid, false, func() {
 			m.workLk.Lock()
 			defer m.workLk.Unlock()
@@ -145,9 +154,11 @@ func (m *Manager) getWork(ctx context.Context, method sealtasks.TaskType, params
 			}
 
 			switch ws.Status {
+			// 如果任务已经在开始，但是未运行，则取消任务
 			case wsStarted:
 				log.Warnf("canceling started (not running) work %s", wid)
 
+				// 根据wid取消这个任务
 				if err := m.work.Get(wid).End(); err != nil {
 					log.Errorf("cancel: failed to cancel started work %s: %+v", wid, err)
 					return
@@ -156,6 +167,7 @@ func (m *Manager) getWork(ctx context.Context, method sealtasks.TaskType, params
 				// TODO: still remove?
 				log.Warnf("cancel called on work %s in 'done' state", wid)
 			case wsRunning:
+				// 如果任务是正在运行状态
 				log.Warnf("cancel called on work %s in 'running' state (manager shutting down?)", wid)
 			}
 

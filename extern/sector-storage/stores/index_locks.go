@@ -90,6 +90,9 @@ type indexLocks struct {
 	locks map[abi.SectorID]*sectorLock
 }
 
+/*
+为每个扇区的读或写动作执行锁定，无法锁定会一直等之前的锁释放。
+ */
 func (i *indexLocks) lockWith(ctx context.Context, lockFn lockFn, sector abi.SectorID, read storiface.SectorFileType, write storiface.SectorFileType) (bool, error) {
 	if read|write == 0 {
 		return false, nil
@@ -103,7 +106,7 @@ func (i *indexLocks) lockWith(ctx context.Context, lockFn lockFn, sector abi.Sec
 	slk, ok := i.locks[sector]
 	if !ok {
 		slk = &sectorLock{}
-		slk.cond = newCtxCond(&sync.Mutex{})
+		slk.cond = newCtxCond(&sync.Mutex{})	// 获取每个扇区的条件变量
 		i.locks[sector] = slk
 	}
 
@@ -111,7 +114,7 @@ func (i *indexLocks) lockWith(ctx context.Context, lockFn lockFn, sector abi.Sec
 
 	i.lk.Unlock()
 
-	locked, err := lockFn(slk, ctx, read, write)
+	locked, err := lockFn(slk, ctx, read, write)	// 尝试锁定，无法锁定会一直等待。
 	if err != nil {
 		return false, err
 	}
@@ -138,7 +141,11 @@ func (i *indexLocks) lockWith(ctx context.Context, lockFn lockFn, sector abi.Sec
 	return true, nil
 }
 
+/*
+manager锁定扇区.
+*/
 func (i *indexLocks) StorageLock(ctx context.Context, sector abi.SectorID, read storiface.SectorFileType, write storiface.SectorFileType) error {
+	// 为每个扇区的读、写动作执行锁定，如果无法锁定会一直等待之前的锁释放。
 	ok, err := i.lockWith(ctx, (*sectorLock).lock, sector, read, write)
 	if err != nil {
 		return err

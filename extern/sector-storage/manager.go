@@ -63,18 +63,18 @@ func (w WorkerID) String() string {
 }
 
 type Manager struct {
-	ls         stores.LocalStorage
-	storage    *stores.Remote
-	localStore *stores.Local
-	remoteHnd  *stores.FetchHandler
+	ls         stores.LocalStorage	// miner本地存储: miner自身存储
+	storage    *stores.Remote		// 封装本地真实存储
+	localStore *stores.Local		// 本地真实存储
+	remoteHnd  *stores.FetchHandler	// 提供API接口：获取本地存储的信息.
 	index      stores.SectorIndex
 
-	sched *scheduler
+	sched *scheduler				// 管理worker
 
-	storage.Prover
+	storage.Prover					// 实现winning post和window post
 
 	workLk sync.Mutex
-	work   *statestore.StateStore
+	work   *statestore.StateStore	// 保存查询任务的存储
 
 	callToWork map[storiface.CallID]WorkID
 	// used when we get an early return and there's no callToWork mapping
@@ -105,17 +105,29 @@ type StorageAuth http.Header
 type WorkerStateStore *statestore.StateStore
 type ManagerStateStore *statestore.StateStore
 
+// miner创建一个新的Manager
+/*
+ls: miner的本地存储（不是用于存储封装临时数据，或者扇区的永久存储）。
+保存元数据和配置文件。
+
+si: 管理扇区封装临时存储，扇区永久存储。
+
+urls: miner自身的API：http://xxxx:2345/remote
+*/
 func New(ctx context.Context, ls stores.LocalStorage, si stores.SectorIndex, sc SealerConfig, urls URLs, sa StorageAuth, wss WorkerStateStore, mss ManagerStateStore) (*Manager, error) {
+	// 创建本地存储：miner自身存储、封装临时存储、扇区永久存储.
 	lstor, err := stores.NewLocal(ctx, ls, si, urls)
 	if err != nil {
 		return nil, err
 	}
 
+	// window post和winning post
 	prover, err := ffiwrapper.New(&readonlyProvider{stor: lstor, index: si})
 	if err != nil {
 		return nil, xerrors.Errorf("creating prover instance: %w", err)
 	}
 
+	// 将本地存储，包装为一个远程存储.
 	stor := stores.NewRemote(lstor, si, http.Header(sa), sc.ParallelFetchLimit)
 
 	m := &Manager{
@@ -190,6 +202,7 @@ func (m *Manager) AddLocalStorage(ctx context.Context, path string) error {
 	return nil
 }
 
+// 让调度器运行worker
 func (m *Manager) AddWorker(ctx context.Context, w Worker) error {
 	return m.sched.runWorker(ctx, w)
 }
@@ -352,6 +365,11 @@ func (m *Manager) SealPreCommit1(ctx context.Context, sector storage.SectorRef, 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// 将（扇区信息、扇区任务类型、tick、pieces）组合成任务（work）信息，
+	// 在manager的datastore中查询，是否存在这个任务，如果不存在则manager保存这个任务的信息，
+	// 并返回任务id，和cancel函数。
+	// 如果存在则直接返回workID.
+	// wait标志，指明了这个任务，是否已经在运行。
 	wk, wait, cancel, err := m.getWork(ctx, sealtasks.TTPreCommit1, sector, ticket, pieces)
 	if err != nil {
 		return nil, xerrors.Errorf("getWork: %w", err)
@@ -359,6 +377,7 @@ func (m *Manager) SealPreCommit1(ctx context.Context, sector storage.SectorRef, 
 	defer cancel()
 
 	var waitErr error
+	// 等待任务（work）完成的函数
 	waitRes := func() {
 		p, werr := m.waitWork(ctx, wk)
 		if werr != nil {
@@ -370,11 +389,13 @@ func (m *Manager) SealPreCommit1(ctx context.Context, sector storage.SectorRef, 
 		}
 	}
 
+	// 如果任务已经在运行（running）就等待任务完成，并返回之前同样任务的执行结果。
 	if wait { // already in progress
 		waitRes()
 		return out, waitErr
 	}
 
+	// manager（矿工）为扇区的读、写动作执行锁定，如果无法锁定会一直等待之前的锁释放。
 	if err := m.index.StorageLock(ctx, sector.ID, storiface.FTUnsealed, storiface.FTSealed|storiface.FTCache); err != nil {
 		return nil, xerrors.Errorf("acquiring sector lock: %w", err)
 	}
@@ -383,14 +404,25 @@ func (m *Manager) SealPreCommit1(ctx context.Context, sector storage.SectorRef, 
 
 	selector := newAllocSelector(m.index, storiface.FTCache|storiface.FTSealed, storiface.PathSealing)
 
-	err = m.sched.Schedule(ctx, sector, sealtasks.TTPreCommit1, selector, m.schedFetch(sector, storiface.FTUnsealed, storiface.PathSealing, storiface.AcquireMove), func(ctx context.Context, w Worker) error {
-		err := m.startWork(ctx, w, wk)(w.SealPreCommit1(ctx, sector, ticket, pieces))
-		if err != nil {
-			return err
-		}
+	// 让调度器开始开始调度扇区任务
+	err = m.sched.Schedule(ctx, sector, sealtasks.TTPreCommit1, selector,
+		// 执行扇区任务之前，调度器需要预先执行的动作。
+		// 这里的动作是，调用worker的Fetch接口，让worker提前把扇区复制到本地.
+		m.schedFetch(sector, storiface.FTUnsealed, storiface.PathSealing, storiface.AcquireMove),
+		// 这个函数就是找到worker后，真正要做的动作。
+		// 这里就是真正的调用worker的SealPreCommit1接口，让worker执行P1.
+		func(ctx context.Context, w Worker) error {
+			// 调用worker的接口执行P1，然会一个调用ID.
+			callID, err := w.SealPreCommit1(ctx, sector, ticket, pieces)
+			waitFunc := m.startWork(ctx, w, wk)
+			// 等待本地调用完成。
+			err = waitFunc(callID, err)
+			if err != nil {
+				return err
+			}
 
-		waitRes()
-		return nil
+			waitRes()
+			return nil
 	})
 	if err != nil {
 		return nil, err
