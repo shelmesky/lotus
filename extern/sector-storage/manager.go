@@ -348,7 +348,10 @@ func (m *Manager) AddPiece(ctx context.Context, sector storage.SectorRef, existi
 
 	var out abi.PieceInfo
 	err = m.sched.Schedule(ctx, sector, sealtasks.TTAddPiece, selector, schedNop, func(ctx context.Context, w Worker) error {
-		p, err := m.waitSimpleCall(ctx)(w.AddPiece(ctx, sector, existingPieces, sz, r))
+		callID, err := w.AddPiece(ctx, sector, existingPieces, sz, r)
+		log.Debugf("^^^^^^^^ AddPiece return callID: [%v]\n", callID)
+		waitFunc := m.waitSimpleCall(ctx)
+		p, err := waitFunc(callID, err)
 		if err != nil {
 			return err
 		}
@@ -357,6 +360,8 @@ func (m *Manager) AddPiece(ctx context.Context, sector storage.SectorRef, existi
 		}
 		return nil
 	})
+
+	log.Debugf("^^^^^^^^ out.PieceCID: [%v]\n", out.PieceCID)
 
 	return out, err
 }

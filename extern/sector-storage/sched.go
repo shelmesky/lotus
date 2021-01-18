@@ -7,11 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-	"golang.org/x/xerrors"
-
 	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/specs-storage/storage"
+	"github.com/google/uuid"
 
 	"github.com/filecoin-project/lotus/extern/sector-storage/sealtasks"
 	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
@@ -124,13 +122,13 @@ type activeResources struct {
 
 // 发送给worker的请求
 type workerRequest struct {
-	sector   storage.SectorRef	// 扇区信息
-	taskType sealtasks.TaskType	// 任务类型
-	priority int // larger values more important	// 任务优先级
-	sel      WorkerSelector		// 任务关联的worker？
+	sector   storage.SectorRef  // 扇区信息
+	taskType sealtasks.TaskType // 任务类型
+	priority int                // larger values more important	// 任务优先级
+	sel      WorkerSelector     // 任务关联的worker？
 
-	prepare WorkerAction		// 任务执行之前，worker需要做的（回调函数）
-	work    WorkerAction		// 任务执行时，worker需要做的（回调函数）
+	prepare WorkerAction // 任务执行之前，worker需要做的（回调函数）
+	work    WorkerAction // 任务执行时，worker需要做的（回调函数）
 
 	start time.Time
 
@@ -174,13 +172,80 @@ sector: 扇区信息：id和扇区大小
 
 taskType: 任务类型
 
- */
+*/
+
+type WorkerPower struct {
+	Hostname     string
+	TotalSectors int
+	APMax        int
+	APUsed       int
+	P1Max        int
+	P1Used       int
+	P2Max        int
+	P2Used       int
+	C1Max        int
+	C1Used       int
+	C2Max        int
+	C2Used       int
+}
+
+var SealingMachines = []WorkerPower{
+	{"miner-node-1", 0, 8, 0, 8, 0, 8, 0, 8, 0, 8, 0},
+	{"worker-node-1", 0, 8, 0, 8, 0, 8, 0, 8, 0, 8, 0},
+	{"worker-node-2", 0, 8, 0, 8, 0, 8, 0, 8, 0, 8, 0},
+}
+
+func CheckMachineTaskUsed() {
+
+}
+
 func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, taskType sealtasks.TaskType,
+	sel WorkerSelector, prepare WorkerAction, work WorkerAction) error {
+	sh.workersLk.Lock()
+	defer sh.workersLk.Unlock()
+
+	ret := make(chan workerResponse)
+
+	workers := sh.workers
+	for workID, Worker := range workers {
+		workFunc := func(ret chan workerResponse) {
+			err := prepare(context.TODO(), sh.workTracker.worker(workID, Worker.workerRpc))
+			if err != nil {
+				log.Errorf("^^^^^^^^ Scheduler: prepare sector: [%] type: [%v] on worker [%v] faield: [%v]\n",
+					sector.ID, taskType, Worker.info.Hostname, err)
+				ret <- workerResponse{err: err}
+			}
+
+			err = work(context.TODO(), sh.workTracker.worker(workID, Worker.workerRpc))
+			if err != nil {
+				log.Errorf("^^^^^^^^ Scheduler: work sector: [%] type: [%v] on worker [%v] faield: [%v]\n",
+					sector.ID, taskType, Worker.info.Hostname, err)
+			}
+
+			ret <- workerResponse{err: err}
+		}
+
+		log.Debugf("^^^^^^^^ Schedule Worker[%v] for sector[%v]\n", Worker.info.Hostname, sector)
+
+		go workFunc(ret)
+
+		select {
+		case resp := <-ret:
+			return resp.err
+		}
+
+	}
+
+	return nil
+}
+
+/*
+func (sh *scheduler) Schedule1(ctx context.Context, sector storage.SectorRef, taskType sealtasks.TaskType,
 	sel WorkerSelector, prepare WorkerAction, work WorkerAction) error {
 	ret := make(chan workerResponse)
 
 	select {
-	case sh.schedule <- &workerRequest{	// 需要worker执行的任务，发送给channel: sh.schedule　
+	case sh.schedule <- &workerRequest{	// 需要worker执行的任务，发送给channel: sh.schedule
 		sector:   sector,
 		taskType: taskType,
 		priority: getPriority(ctx),
@@ -209,6 +274,7 @@ func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, tas
 		return ctx.Err()
 	}
 }
+*/
 
 func (r *workerRequest) respond(err error) {
 	select {
@@ -233,7 +299,7 @@ type SchedDiagInfo struct {
 func (sh *scheduler) runSched() {
 	defer close(sh.closed)
 
-	iw := time.After(InitWait)	// 等待3秒
+	iw := time.After(InitWait) // 等待3秒
 	var initialised bool
 
 	for {
@@ -246,9 +312,9 @@ func (sh *scheduler) runSched() {
 		case dreq := <-sh.workerDisable:
 			toDisable = append(toDisable, dreq)
 			doSched = true
-		case req := <-sh.schedule:	// 收到worker任务
-			sh.schedQueue.Push(req)	// 将任务发送到请求队列中
-			doSched = true			// 标志为：需要调度
+		case req := <-sh.schedule: // 收到worker任务
+			sh.schedQueue.Push(req) // 将任务发送到请求队列中
+			doSched = true          // 标志为：需要调度
 
 			if sh.testSync != nil {
 				sh.testSync <- struct{}{}
@@ -314,7 +380,7 @@ func (sh *scheduler) runSched() {
 				req.done()
 			}
 
-			sh.trySched()	// 调度worker
+			sh.trySched() // 调度worker
 		}
 
 	}
@@ -360,11 +426,11 @@ func (sh *scheduler) trySched() {
 
 	*/
 
-	sh.workersLk.RLock()	// 锁定调度器全局锁
+	sh.workersLk.RLock() // 锁定调度器全局锁
 	defer sh.workersLk.RUnlock()
 
 	windowsLen := len(sh.openWindows)
-	queuneLen := sh.schedQueue.Len()	// 请求队列长度
+	queuneLen := sh.schedQueue.Len() // 请求队列长度
 
 	log.Debugf("SCHED %d queued; %d open windows", queuneLen, windowsLen)
 
@@ -378,21 +444,21 @@ func (sh *scheduler) trySched() {
 	acceptableWindows := make([][]int, queuneLen)
 
 	// Step 1
-	throttle := make(chan struct{}, windowsLen)	// 根据窗口大小创建 throttle
+	throttle := make(chan struct{}, windowsLen) // 根据窗口大小创建 throttle
 
 	var wg sync.WaitGroup
 	wg.Add(queuneLen)
-	for i := 0; i < queuneLen; i++ {	// 根据请求队列大小循环
+	for i := 0; i < queuneLen; i++ { // 根据请求队列大小循环
 		throttle <- struct{}{}
 
-		go func(sqi int) {	// 启动goroutine
+		go func(sqi int) { // 启动goroutine
 			defer wg.Done()
 			defer func() {
 				<-throttle
 			}()
 
-			task := (*sh.schedQueue)[sqi]	// 从请求队列中取出任务
-			needRes := ResourceTable[task.taskType][task.sector.ProofType]	// 根据扇区大小和任务类型，得出需要的资源大小
+			task := (*sh.schedQueue)[sqi]                                  // 从请求队列中取出任务
+			needRes := ResourceTable[task.taskType][task.sector.ProofType] // 根据扇区大小和任务类型，得出需要的资源大小
 
 			task.indexHeap = sqi
 			for wnd, windowRequest := range sh.openWindows {
@@ -403,7 +469,7 @@ func (sh *scheduler) trySched() {
 					continue
 				}
 
-				if !worker.enabled {	// 如果worker被禁止
+				if !worker.enabled { // 如果worker被禁止
 					log.Debugw("skipping disabled worker", "worker", windowRequest.worker)
 					continue
 				}

@@ -333,8 +333,8 @@ func (m *Manager) waitSimpleCall(ctx context.Context) func(callID storiface.Call
 
 func (m *Manager) waitCall(ctx context.Context, callID storiface.CallID) (interface{}, error) {
 	m.workLk.Lock()
-	_, ok := m.callToWork[callID]
-	if ok {
+	_, ok := m.callToWork[callID]	// 在callToWork中，查找callID是否存在
+	if ok {	// 如果 存在，就报告错误
 		m.workLk.Unlock()
 		return nil, xerrors.Errorf("can't wait for calls related to work")
 	}
@@ -362,6 +362,7 @@ func (m *Manager) waitCall(ctx context.Context, callID storiface.CallID) (interf
 }
 
 func (m *Manager) returnResult(callID storiface.CallID, r interface{}, cerr *storiface.CallError) error {
+	log.Debugf("^^^^^^^^ manager returnResult() called, result: [%v]\n", r)
 	res := result{
 		r: r,
 	}
@@ -389,6 +390,7 @@ func (m *Manager) returnResult(callID storiface.CallID, r interface{}, cerr *sto
 			return xerrors.Errorf("expected rch to be buffered")
 		}
 
+		log.Debugf("^^^^^^^^ manager returnResult() write res to rch!\n")
 		rch <- res
 		return nil
 	}
