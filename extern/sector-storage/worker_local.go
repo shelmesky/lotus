@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+
+	//"os"
 	"reflect"
 	"runtime"
 	"sync"
@@ -55,6 +57,8 @@ type LocalWorker struct {
 	testDisable int64
 	closing     chan struct{}
 }
+
+var WorkerHostname string
 
 func newLocalWorker(executor ExecutorFunc, wcfg WorkerConfig, store stores.Store, local *stores.Local, sindex stores.SectorIndex, ret storiface.WorkerReturn, cst *statestore.StateStore) *LocalWorker {
 	acceptTasks := map[sealtasks.TaskType]struct{}{}
@@ -485,9 +489,17 @@ func (l *LocalWorker) Paths(ctx context.Context) ([]stores.StoragePath, error) {
 }
 
 func (l *LocalWorker) Info(context.Context) (storiface.WorkerInfo, error) {
-	hostname, err := os.Hostname() // TODO: allow overriding from config
-	if err != nil {
-		panic(err)
+	//hostname, err := os.Hostname() // TODO: allow overriding from config
+
+	var hostname string
+	var err error
+	if len(WorkerHostname) > 0 {
+		hostname = WorkerHostname
+	} else {
+		hostname, err = os.Hostname()
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	gpus, err := ffi.GetGPUDevices()

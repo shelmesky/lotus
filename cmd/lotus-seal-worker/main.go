@@ -156,6 +156,11 @@ var runCmd = &cli.Command{
 			Usage: "used when 'listen' is unspecified. must be a valid duration recognized by golang's time.ParseDuration function",
 			Value: "30m",
 		},
+		&cli.StringFlag{
+			Name:  "hostname",
+			Usage: "hostname for worker",
+			Value: "",
+		},
 	},
 	Before: func(cctx *cli.Context) error {
 		if cctx.IsSet("address") {
@@ -214,6 +219,9 @@ var runCmd = &cli.Command{
 			return xerrors.Errorf("lotus-miner API version doesn't match: expected: %s", api.Version{APIVersion: build.MinerAPIVersion})
 		}
 		log.Infof("Remote version %s", v)
+
+		// 设置worker主机名
+		sectorstorage.WorkerHostname = cctx.String("hostname")
 
 		// Check params
 
@@ -371,6 +379,7 @@ var runCmd = &cli.Command{
 		// 创建Remote结构：本地存储、miner api信息、API的token和api
 		remote := stores.NewRemote(localStore, nodeApi, sminfo.AuthHeader(), cctx.Int("parallel-fetch-limit"))
 
+		// remoteHandler 用于查看扇区状态，get/remove扇区。
 		fh := &stores.FetchHandler{Local: localStore}
 		remoteHandler := func(w http.ResponseWriter, r *http.Request) {
 			if !auth.HasPerm(r.Context(), nil, apistruct.PermAdmin) {
@@ -386,6 +395,7 @@ var runCmd = &cli.Command{
 
 		wsts := statestore.New(namespace.Wrap(ds, modules.WorkerCallsPrefix))
 
+		// worker对外的API: 扇区封装、移除扇区、
 		workerApi := &worker{
 			LocalWorker: sectorstorage.NewLocalWorker(sectorstorage.WorkerConfig{
 				TaskTypes: taskTypes,
@@ -405,7 +415,7 @@ var runCmd = &cli.Command{
 
 		mux.Handle("/rpc/v0", rpcServer)
 		mux.Handle("/rpc/streams/v0/push/{uuid}", readerHandler)
-		mux.PathPrefix("/remote").HandlerFunc(remoteHandler)
+		mux.PathPrefix("/remote").HandlerFunc(remoteHandler)	// 负责查看、读取、扇区扇区
 		mux.PathPrefix("/").Handler(http.DefaultServeMux) // pprof
 
 		ah := &auth.Handler{

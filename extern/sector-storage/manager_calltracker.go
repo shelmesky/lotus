@@ -34,18 +34,20 @@ const (
 	wsDone    WorkStatus = "done"    // task returned from the worker, results available
 )
 
+// 工作状态
 type WorkState struct {
-	ID WorkID
+	ID WorkID	// 工作ID
 
-	Status WorkStatus
+	Status WorkStatus	// 工作状态：started/running/done
 
 	WorkerCall storiface.CallID // Set when entering wsRunning
 	WorkError  string           // Status = wsDone, set when failed to start work
 
-	WorkerHostname string // hostname of last worker handling this job
-	StartTime      int64  // unix seconds
+	WorkerHostname string // 最后处理这个任务的worker名字
+	StartTime      int64  // 任务开始时间：unix时间戳
 }
 
+// 根据任务类型、扇区的信息生成一个WorkID数据
 func newWorkID(method sealtasks.TaskType, params ...interface{}) (WorkID, error) {
 	pb, err := json.Marshal(params)
 	if err != nil {
@@ -63,38 +65,43 @@ func newWorkID(method sealtasks.TaskType, params ...interface{}) (WorkID, error)
 	}, nil
 }
 
+// 设置工作跟踪器
 func (m *Manager) setupWorkTracker() {
 	m.workLk.Lock()
 	defer m.workLk.Unlock()
 
+	// 从manager的manager state store中读取 "工作状态" 列表
 	var ids []WorkState
 	if err := m.work.List(&ids); err != nil {
 		log.Error("getting work IDs") // quite bad
 		return
 	}
 
+	// 循环处理每个工作
 	for _, st := range ids {
 		wid := st.ID
 
+		// 如果定义了环境变量 LOTUS_MINER_ABORT_UNFINISHED_WORK，就设置任务状态是wsDone.
 		if os.Getenv("LOTUS_MINER_ABORT_UNFINISHED_WORK") == "1" {
 			st.Status = wsDone
 		}
 
 		switch st.Status {
-		case wsStarted:
+		case wsStarted:	// 工作已经开始，但是没有调度/运行在任何一个worker上
 			log.Warnf("dropping non-running work %s", wid)
 
+			// 放弃未运行的任务
 			if err := m.work.Get(wid).End(); err != nil {
 				log.Errorf("cleannig up work state for %s", wid)
 			}
-		case wsDone:
+		case wsDone:	// 已经从worker返回的工作，返回的结果可用？
 			// can happen after restart, abandoning work, and another restart
 			log.Warnf("dropping done work, no result, wid %s", wid)
 
 			if err := m.work.Get(wid).End(); err != nil {
 				log.Errorf("cleannig up work state for %s", wid)
 			}
-		case wsRunning:
+		case wsRunning:	// 工作正在运行在一个worker上，等待worker返回。
 			m.callToWork[st.WorkerCall] = wid
 		}
 	}
@@ -123,7 +130,7 @@ func (m *Manager) getWork(ctx context.Context, method sealtasks.TaskType, params
 
 	// 如果manager中不存在这个任务
 	if !have {
-		// 在manager的datastore保存这个任务的信息（持久话任务信息）
+		// 在manager的datastore保存这个任务的信息（持久化任务信息）
 		err := m.work.Begin(wid, &WorkState{
 			ID:     wid,
 			Status: wsStarted,
@@ -132,7 +139,7 @@ func (m *Manager) getWork(ctx context.Context, method sealtasks.TaskType, params
 			return WorkID{}, false, nil, xerrors.Errorf("failed to track task start: %w", err)
 		}
 
-		// 返回workID、没有任务等待标志、取消函数
+		// 返回workID、有无任务等待标志、取消函数
 		return wid, false, func() {
 			m.workLk.Lock()
 			defer m.workLk.Unlock()

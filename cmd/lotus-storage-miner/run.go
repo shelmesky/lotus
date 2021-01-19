@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	sectorstorage "github.com/filecoin-project/lotus/extern/sector-storage"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -54,6 +55,11 @@ var runCmd = &cli.Command{
 			Usage: "manage open file limit",
 			Value: true,
 		},
+		&cli.StringFlag{
+			Name:  "hostname",
+			Usage: "hostname for worker",
+			Value: "",
+		},
 	},
 	Action: func(cctx *cli.Context) error {
 		if !cctx.Bool("enable-gpu-proving") {
@@ -87,6 +93,9 @@ var runCmd = &cli.Command{
 				log.Errorf("setting file descriptor limit: %s", err)
 			}
 		}
+
+		// 设置worker主机名
+		sectorstorage.WorkerHostname = cctx.String("hostname")
 
 		if v.APIVersion != build.FullAPIVersion {
 			return xerrors.Errorf("lotus-daemon API version doesn't match: expected: %s", api.Version{APIVersion: build.FullAPIVersion})

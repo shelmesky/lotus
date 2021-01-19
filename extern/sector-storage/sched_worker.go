@@ -25,6 +25,7 @@ type schedWorker struct {
 // context only used for startup
 func (sh *scheduler) runWorker(ctx context.Context, w Worker) error {
 	// 调用worker的api，获取worker的hostname，以及cpu、内存、gpu资源的信息。
+	// 如果是miner的本地worker，会直接
 	info, err := w.Info(ctx)
 	if err != nil {
 		return xerrors.Errorf("getting worker info: %w", err)

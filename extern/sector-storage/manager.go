@@ -141,13 +141,16 @@ func New(ctx context.Context, ls stores.LocalStorage, si stores.SectorIndex, sc 
 
 		Prover: prover,
 
-		work:       mss,
+		work:       mss,	// 保存之前工作状态的存储
 		callToWork: map[storiface.CallID]WorkID{},
 		callRes:    map[storiface.CallID]chan result{},
 		results:    map[WorkID]result{},
 		waitRes:    map[WorkID]chan struct{}{},
 	}
 
+	/*
+	从mss(manage state store)中恢复work状态
+	 */
 	m.setupWorkTracker()
 
 	// 启动调度器
