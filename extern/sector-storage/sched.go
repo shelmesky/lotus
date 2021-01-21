@@ -269,16 +269,13 @@ func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, tas
 		return err
 	}
 
-	for _, v := range sh.workers {
-		log.Infof("^^^^^^^^ Manager管理的机器: [%v]\n", v.info.Hostname)
-	}
-
 	var workerID WorkerID
 	var Worker *workerHandle
 	sh.workersLk.Lock()
-	for workerID, Worker = range sh.workers {
-		log.Debugf("^^^^^^^^ 调度器：打印所有worker: [%v]\n", workerID, Worker.info.Hostname)
+	for wid, w := range sh.workers {
+		log.Debugf("^^^^^^^^ 调度器：打印所有worker: [%v], [%v]\n", wid, w.info.Hostname)
 		if Worker.info.Hostname == bestWorkerName {
+			Worker = w
 			break
 		}
 	}
