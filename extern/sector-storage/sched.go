@@ -208,10 +208,10 @@ func init() {
 
 func IntWorerList() {
 	SealingWorkers = append(SealingWorkers, &WorkerPower{
-		"miner-node", 0, 8,
+		"miner-node-1", 0, 8,
 	})
 	SealingWorkers = append(SealingWorkers, &WorkerPower{
-		"worker-node", 0, 8,
+		"worker-node-1", 0, 8,
 	})
 }
 
@@ -276,8 +276,13 @@ func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, tas
 		log.Debugf("^^^^^^^^ 调度器：打印所有worker: [%v], [%v]\n", wid, w.info.Hostname)
 		if w.info.Hostname == bestWorkerName {
 			Worker = w
+			log.Debugf("^^^^^^^^ 调度器：最优Worker [%v]　在线!\n", w.info.Hostname)
 			break
 		}
+
+		Worker = w
+		log.Debugf("^^^^^^^^ 调度器：最优Worker [%v]　未在线，找到替代Worker [%v]!\n",
+			bestWorkerName, w.info.Hostname)
 	}
 	sh.workersLk.Unlock()
 
