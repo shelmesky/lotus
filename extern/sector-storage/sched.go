@@ -238,7 +238,7 @@ func (sh *scheduler) getBestWorker(sector storage.SectorRef, taskType sealtasks.
 		// 寻找worker列表中，当前sectors最小的那台worker，把任务分配给它
 
 		log.Debugf("^^^^^^^^ 扇区 [%d] 从未调度过，开始调度。\n", sector.ID.Number)
-		log.Debug("^^^^^^^^ 排序后的列表: ", SealingWorkers[0], SealingWorkers[1])
+		log.Debug("^^^^^^^^ 排序前的列表: ", SealingWorkers[0], SealingWorkers[1])
 		sort.Sort(ByWorkerCurrentSectors(SealingWorkers))
 		minSectorWorker := SealingWorkers[0]
 
@@ -249,9 +249,6 @@ func (sh *scheduler) getBestWorker(sector storage.SectorRef, taskType sealtasks.
 			log.Debugf("^^^^^^^^ 发现 Worker [%v] 的任务数量已经达到最大，无法调度。\n", minSectorWorker.Hostname)
 			return "", fmt.Errorf("^^^^^^^^ Scheduler reached worker MaxSectors, worker [%v]\n", minSectorWorker.Hostname)
 		}
-
-		log.Debugf("^^^^^^^^ 调度器：扇区 [%v] 任务类型 [%v] 已经调度到 Worker [%v]上执行。\n",
-			sector.ID.Number, taskType, minSectorWorker.Hostname)
 
 		minSectorWorker.CurrentSectors += 1
 		sectorInWorker[sector.ID.Number] = minSectorWorker.Hostname
@@ -284,6 +281,9 @@ func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, tas
 		}
 	}
 	sh.workersLk.Unlock()
+
+	log.Debugf("^^^^^^^^ 调度器：扇区 [%v] 任务类型 [%v] 已经调度到 Worker [%v]上执行。\n",
+		sector.ID.Number, taskType, Worker.info.Hostname)
 
 	workFunc := func(ret chan workerResponse) {
 		err := prepare(context.TODO(), sh.workTracker.worker(workerID, Worker.workerRpc))
