@@ -264,6 +264,7 @@ func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, tas
 	ret := make(chan workerResponse)
 
 	bestWorkerName, err := sh.getBestWorker(sector, taskType)
+	log.Debugf("^^^^^^^^ 调度器：获取到最优的Worker: [%v]\n", bestWorkerName)
 	if err != nil {
 		return err
 	}
@@ -276,6 +277,7 @@ func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, tas
 	var Worker *workerHandle
 	sh.workersLk.Lock()
 	for workerID, Worker = range sh.workers {
+		log.Debugf("^^^^^^^^ 调度器：打印所有worker: [%v]\n", workerID, Worker.info.Hostname)
 		if Worker.info.Hostname == bestWorkerName {
 			break
 		}
