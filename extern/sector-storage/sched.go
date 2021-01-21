@@ -272,19 +272,25 @@ func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, tas
 	var workerID WorkerID
 	var Worker *workerHandle
 	sh.workersLk.Lock()
-	for wid, w := range sh.workers {
-		log.Debugf("^^^^^^^^ 调度器：打印所有worker: [%v], [%v]\n", wid, w.info.Hostname)
-		if w.info.Hostname == bestWorkerName {
-			Worker = w
-			log.Debugf("^^^^^^^^ 调度器：最优Worker [%v]　在线!\n", w.info.Hostname)
-			break
+	for {
+		for wid, w := range sh.workers {
+			log.Debugf("^^^^^^^^ 调度器：打印所有worker: [%v], [%v]\n", wid, w.info.Hostname)
+			if w.info.Hostname == bestWorkerName {
+				Worker = w
+				log.Debugf("^^^^^^^^ 调度器：最优Worker [%v]　在线!\n", w.info.Hostname)
+				goto Run
+			}
 		}
 
-		Worker = w
-		log.Debugf("^^^^^^^^ 调度器：最优Worker [%v]　未在线，找到替代Worker [%v]!\n",
-			bestWorkerName, w.info.Hostname)
+		if Worker == nil {
+			log.Debugf("^^^^^^^^ 调度器：最优Worker [%v]　离线，等待Worker上线!\n", bestWorkerName)
+			time.Sleep(time.Second * 5)
+		}
 	}
+
+Run:
 	sh.workersLk.Unlock()
+
 
 	log.Debugf("^^^^^^^^ 调度器：扇区 [%v] 任务类型 [%v] 已经调度到 Worker [%v]上执行。\n",
 		sector.ID.Number, taskType, Worker.info.Hostname)
