@@ -31,10 +31,14 @@ func (m *Manager) WorkerStats() map[uuid.UUID]storiface.WorkerStats {
 
 func (m *Manager) WorkerJobs() map[uuid.UUID][]storiface.WorkerJob {
 	out := map[uuid.UUID][]storiface.WorkerJob{}
-	calls := map[storiface.CallID]struct{}{}
+	calls := map[storiface.CallID]struct{}{}	// 正在调用的
+
+	log.Infof("^^^^^^^^ 00000000 calling WorkerJobs\n")
 
 	for _, t := range m.sched.workTracker.Running() {
 		out[uuid.UUID(t.worker)] = append(out[uuid.UUID(t.worker)], t.job)
+		log.Infof("^^^^^^^^ 11111111 ID: [%v], Sector: [%v], Task: [%v], Hostname: [%v], Start: [%v]\n",
+			t.job.ID, t.job.Sector.Number, t.job.Task, t.job.Hostname, t.job.Start)
 		calls[t.job.ID] = struct{}{}
 	}
 
@@ -62,6 +66,7 @@ func (m *Manager) WorkerJobs() map[uuid.UUID][]storiface.WorkerJob {
 	defer m.workLk.Unlock()
 
 	for id, work := range m.callToWork {
+		log.Infof("^^^^^^^^ 22222222 callID: [%v], workID: [%v]\n", id, work)
 		_, found := calls[id]
 		if found {
 			continue

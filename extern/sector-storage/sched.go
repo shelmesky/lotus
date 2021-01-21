@@ -264,9 +264,6 @@ func (sh *scheduler) getBestWorker(sector storage.SectorRef, taskType sealtasks.
 
 func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, taskType sealtasks.TaskType,
 	sel WorkerSelector, prepare WorkerAction, work WorkerAction) error {
-	sh.workersLk.Lock()
-	defer sh.workersLk.Unlock()
-
 	ret := make(chan workerResponse)
 
 	bestWorkerName, err := sh.getBestWorker(sector, taskType)
@@ -280,11 +277,13 @@ func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, tas
 
 	var workerID WorkerID
 	var Worker *workerHandle
+	sh.workersLk.Lock()
 	for workerID, Worker = range sh.workers {
 		if Worker.info.Hostname == bestWorkerName {
 			break
 		}
 	}
+	sh.workersLk.Unlock()
 
 	workFunc := func(ret chan workerResponse) {
 		err := prepare(context.TODO(), sh.workTracker.worker(workerID, Worker.workerRpc))
@@ -316,7 +315,7 @@ func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, tas
 }
 
 /*
-func (sh *scheduler) Schedule1(ctx context.Context, sector storage.SectorRef, taskType sealtasks.TaskType,
+func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, taskType sealtasks.TaskType,
 	sel WorkerSelector, prepare WorkerAction, work WorkerAction) error {
 	ret := make(chan workerResponse)
 

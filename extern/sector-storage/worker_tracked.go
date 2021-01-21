@@ -15,11 +15,13 @@ import (
 	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
 )
 
+// 记录被跟踪的任务信息和分配的worker
 type trackedWork struct {
 	job    storiface.WorkerJob
 	worker WorkerID
 }
 
+// 跟踪正在运行的和结束的任务
 type workTracker struct {
 	lk sync.Mutex
 
@@ -29,6 +31,7 @@ type workTracker struct {
 	// TODO: done, aggregate stats, queue stats, scheduler feedback
 }
 
+// 每个类型的扇区任务，都会有被worker调用doReturn函数，进而通知本函数相关调用完成。
 func (wt *workTracker) onDone(callID storiface.CallID) {
 	wt.lk.Lock()
 	defer wt.lk.Unlock()
@@ -42,6 +45,8 @@ func (wt *workTracker) onDone(callID storiface.CallID) {
 	delete(wt.running, callID)
 }
 
+// 每个类型的扇区任务一开始，都会调用本函数，根据callID，将任务放在running容器里。
+// 如果已经完成，就是running容器里删除。
 func (wt *workTracker) track(wid WorkerID, sid storage.SectorRef, task sealtasks.TaskType) func(storiface.CallID, error) (storiface.CallID, error) {
 	return func(callID storiface.CallID, err error) (storiface.CallID, error) {
 		if err != nil {

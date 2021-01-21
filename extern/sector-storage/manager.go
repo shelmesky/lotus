@@ -63,18 +63,18 @@ func (w WorkerID) String() string {
 }
 
 type Manager struct {
-	ls         stores.LocalStorage	// miner本地存储: miner自身存储
-	storage    *stores.Remote		// 封装本地真实存储
-	localStore *stores.Local		// 本地真实存储
-	remoteHnd  *stores.FetchHandler	// 提供API接口：获取本地存储的信息.
+	ls         stores.LocalStorage  // miner本地存储: miner自身存储
+	storage    *stores.Remote       // 封装本地真实存储
+	localStore *stores.Local        // 本地真实存储
+	remoteHnd  *stores.FetchHandler // 提供API接口：获取本地存储的信息.
 	index      stores.SectorIndex
 
-	sched *scheduler				// 管理worker
+	sched *scheduler // 管理worker
 
-	storage.Prover					// 实现winning post和window post
+	storage.Prover // 实现winning post和window post
 
 	workLk sync.Mutex
-	work   *statestore.StateStore	// 保存查询任务的存储
+	work   *statestore.StateStore // 保存查询任务的存储
 
 	callToWork map[storiface.CallID]WorkID
 	// used when we get an early return and there's no callToWork mapping
@@ -141,7 +141,18 @@ func New(ctx context.Context, ls stores.LocalStorage, si stores.SectorIndex, sc 
 
 		Prover: prover,
 
-		work:       mss,	// 保存之前工作状态的存储
+		// 这里保存了任务调度给worker的信息：
+		/*
+			ID WorkID	// 工作ID
+			Status WorkStatus	// 工作状态：started/running/done
+			WorkerCall storiface.CallID // Set when entering wsRunning
+			WorkError  string           // Status = wsDone, set when failed to start work
+			WorkerHostname string // 最后处理这个任务的worker名字
+			StartTime      int64  // 任务开始时间：unix时间戳
+		*/
+		// 初始化时从磁盘加载之前的数据。
+		work: mss,
+
 		callToWork: map[storiface.CallID]WorkID{},
 		callRes:    map[storiface.CallID]chan result{},
 		results:    map[WorkID]result{},
@@ -149,8 +160,8 @@ func New(ctx context.Context, ls stores.LocalStorage, si stores.SectorIndex, sc 
 	}
 
 	/*
-	从mss(manage state store)中恢复work状态
-	 */
+		从mss(manage state store)中恢复work状态
+	*/
 	m.setupWorkTracker()
 
 	// 启动调度器
@@ -385,8 +396,11 @@ func (m *Manager) SealPreCommit1(ctx context.Context, sector storage.SectorRef, 
 	defer cancel()
 
 	var waitErr error
-	// 等待任务（work）完成的函数
+	// 等待旧任务（work）完成的函数.
+	// 也就是说，miner重启过，但是这个任务依然被某个worker运行.
+	// 作为miner自然要等待旧的任务完成，而不是重新开始。
 	waitRes := func() {
+		//
 		p, werr := m.waitWork(ctx, wk)
 		if werr != nil {
 			waitErr = werr
@@ -431,7 +445,7 @@ func (m *Manager) SealPreCommit1(ctx context.Context, sector storage.SectorRef, 
 
 			waitRes()
 			return nil
-	})
+		})
 	if err != nil {
 		return nil, err
 	}
