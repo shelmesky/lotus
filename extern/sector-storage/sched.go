@@ -274,7 +274,7 @@ func (sh *scheduler) Schedule(ctx context.Context, sector storage.SectorRef, tas
 	sh.workersLk.Lock()
 	for wid, w := range sh.workers {
 		log.Debugf("^^^^^^^^ 调度器：打印所有worker: [%v], [%v]\n", wid, w.info.Hostname)
-		if Worker.info.Hostname == bestWorkerName {
+		if w.info.Hostname == bestWorkerName {
 			Worker = w
 			break
 		}
